@@ -1,7 +1,9 @@
 using System.Net.Sockets;
 using System.Text;
 using DashboardServer.DTOs;
+using DashboardServer.Hubs;
 using DashboardServer.Utilities;
+using Microsoft.AspNetCore.SignalR;
 
 namespace DashboardServer.Services;
 
@@ -14,6 +16,7 @@ public interface IBitcoinNodeConnection
     public Task ReceiveData();
     public void GetAddresses();
     public void Disconnect();
+    public NodeState GetState();
 }
 
 /// <summary>
@@ -22,9 +25,19 @@ public interface IBitcoinNodeConnection
 public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
 {
     private readonly IConfiguration _configuration;
+    private readonly IHubContext<BitcoinNodeHub> _bitcoinNodeHubContext;
+    
     private TcpClient? _client;
     private NetworkStream? _stream;
     private Queue<NodeMessage> _writeQueue = new();
+    
+    private List<MessageReference> _sentMessages = new();
+    private List<MessageReference> _receivedMessages = new();
+
+    private string? _protocolVersion;
+    private string? _userAgent;
+    
+    private List<InvVector> _invVectors = new();
 
     /// <summary>
     /// List of messages that can be sent and received by a Bitcoin node
@@ -42,9 +55,11 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
     /// Constructor for BitcoinNodeConnection
     /// </summary>
     /// <param name="configuration"></param>
-    public BitcoinNodeConnection(IConfiguration configuration)
+    public BitcoinNodeConnection(IConfiguration configuration, IHubContext<BitcoinNodeHub> bitcoinNodeHubContext)
     {
+        Console.WriteLine("Bitcoin node configuration constructor hit");
         _configuration = configuration;
+        _bitcoinNodeHubContext = bitcoinNodeHubContext;
     }
 
     /// <summary>
@@ -96,6 +111,8 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
 
         // // Send the version payload
         await _stream.WriteAsync(versionMessage, 0, versionMessage.Length);
+        
+        _sentMessages.Add(new MessageReference(DateTime.Now, "version"));
 
         var versionResponse = await ReadNext();
 
@@ -111,6 +128,12 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
         var versionHexDump = versionResponse.ToString();
         ret.Append(versionHexDump);
         Console.Write(versionHexDump);
+        
+        // Get the protocol version (first 4 bytes of the payload)
+        _protocolVersion = BitConverter.ToString(versionResponse.payload.Take(4).ToArray());
+        
+        // Get the user agent (next 1 byte of the payload)
+        _userAgent = Encoding.Default.GetString(versionResponse.payload.Skip(4).Take(1).ToArray());
 
         if (versionResponse.message != "version")
         {
@@ -129,6 +152,7 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
         byte[] verackPayload = new byte[24];
         Array.Copy(verackResp.header, 0, verackPayload, 0, 24);
         await _stream.WriteAsync(verackPayload, 0, verackPayload.Length);
+        _sentMessages.Add(new MessageReference(DateTime.Now, "verack"));
 
         Console.WriteLine(HexUtils.GetHexDumpString(verackPayload));
 
@@ -152,6 +176,10 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
 
             Console.WriteLine("Disconnected from Bitcoin node");
         }
+        else
+        {
+            throw new InvalidOperationException("Client not connected");
+        }
     }
 
     /// <summary>
@@ -161,12 +189,16 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
     {
         while (_connected)
         {
+            var dispatchState = false;
+            
             // Check if there are any messages queued to write, otherwise continue reading next
             if (_writeQueue.Count > 0)
             {
                 var message = _writeQueue.Dequeue();
                 Console.WriteLine($"\nSending {message.message} message");
                 await _stream.WriteAsync(message.payload, 0, message.payload.Length);
+                _sentMessages.Add(new MessageReference(DateTime.Now, message.message));
+                dispatchState = true;
             }
 
             var resp = await ReadNext();
@@ -174,6 +206,7 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
             if (resp.message is not null && BITCOIN_NODE_MESSAGES.Contains(resp.message))
             {
                 Console.WriteLine($"\nReceived {resp.message} message");
+                _receivedMessages.Add(new MessageReference(DateTime.Now, resp.message));
                 // Console.Write(resp.ToString());
 
                 if (resp.message == "addr")
@@ -185,6 +218,13 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
                 {
                     HandleInv(resp);
                 }
+
+                dispatchState = true;
+            }
+
+            if (dispatchState)
+            {
+                await _bitcoinNodeHubContext.Clients.All.SendAsync("State", GetState());
             }
         }
     }
@@ -252,7 +292,13 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
             // Read and process each inventory vector...
             var type = reader.ReadUInt32();
             var hash = reader.ReadBytes(32);
-            Console.WriteLine($"Type: {type}, Hash: {BitConverter.ToString(hash)}");
+            // Console.WriteLine($"Type: {type}, Hash: {BitConverter.ToString(hash)}");
+            
+            _invVectors.Add(new InvVector
+            {
+                Type = type,
+                Hash = BitConverter.ToString(hash)
+            });
         }
     }
 
@@ -294,5 +340,18 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
         _connected = false;
         _client.Dispose();
         _stream.Dispose();
+    }
+
+    public NodeState GetState()
+    {
+        return new NodeState
+        {
+            Connected = _connected,
+            SentMessages = _sentMessages,
+            ReceivedMessages = _receivedMessages,
+            UserAgent = _userAgent,
+            ProtocolVersion = _protocolVersion,
+            InvVectors = _invVectors
+        };
     }
 }
