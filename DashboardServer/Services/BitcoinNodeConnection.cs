@@ -15,8 +15,10 @@ public interface IBitcoinNodeConnection
     public Task<string> ConnectToNode(string nodeIp, ushort nodePort);
     public Task ReceiveData();
     public void GetAddresses();
+    public void GetData(string hash);
     public void Disconnect();
     public NodeState GetState();
+    public string GetMessagePayload(string id);
 }
 
 /// <summary>
@@ -38,6 +40,8 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
     private string? _userAgent;
     
     private List<InvVector> _invVectors = new();
+    
+    private Dictionary<string, string> _messagePayloads = new();
 
     /// <summary>
     /// List of messages that can be sent and received by a Bitcoin node
@@ -112,7 +116,9 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
         // // Send the version payload
         await _stream.WriteAsync(versionMessage, 0, versionMessage.Length);
         
-        _sentMessages.Add(new MessageReference(DateTime.Now, "version"));
+        var messageID = Guid.NewGuid().ToString();
+        _sentMessages.Add(new MessageReference(DateTime.Now, "version", messageID));
+        _messagePayloads.Add(messageID, HexUtils.GetHexDumpString(versionMessage));
 
         var versionResponse = await ReadNext();
 
@@ -152,7 +158,10 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
         byte[] verackPayload = new byte[24];
         Array.Copy(verackResp.header, 0, verackPayload, 0, 24);
         await _stream.WriteAsync(verackPayload, 0, verackPayload.Length);
-        _sentMessages.Add(new MessageReference(DateTime.Now, "verack"));
+        
+        var messageID2 = Guid.NewGuid().ToString();
+        _sentMessages.Add(new MessageReference(DateTime.Now, "verack", messageID2));
+        _messagePayloads.Add(messageID2, HexUtils.GetHexDumpString(verackPayload));
 
         Console.WriteLine(HexUtils.GetHexDumpString(verackPayload));
 
@@ -196,8 +205,17 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
             {
                 var message = _writeQueue.Dequeue();
                 Console.WriteLine($"\nSending {message.message} message");
+                
+                var messageID = Guid.NewGuid().ToString();
                 await _stream.WriteAsync(message.payload, 0, message.payload.Length);
-                _sentMessages.Add(new MessageReference(DateTime.Now, message.message));
+                _sentMessages.Add(new MessageReference(DateTime.Now, message.message, messageID));
+                _messagePayloads.Add(messageID, HexUtils.GetHexDumpString(message.payload));
+
+                if (message.message == "getdata")
+                {
+                    Console.WriteLine(message.ToString());
+                }
+                
                 dispatchState = true;
             }
 
@@ -206,7 +224,10 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
             if (resp.message is not null && BITCOIN_NODE_MESSAGES.Contains(resp.message))
             {
                 Console.WriteLine($"\nReceived {resp.message} message");
-                _receivedMessages.Add(new MessageReference(DateTime.Now, resp.message));
+                
+                var messageID = Guid.NewGuid().ToString();
+                _receivedMessages.Add(new MessageReference(DateTime.Now, resp.message, messageID));
+                _messagePayloads.Add(messageID, resp.ToString());
                 // Console.Write(resp.ToString());
 
                 if (resp.message == "addr")
@@ -262,6 +283,43 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
 
         // Await the addr message
         // var addrResp = await ReadNext();
+    }
+
+    /// <summary>
+    /// Enqueues a getdata payload to the write queue.
+    /// The payload will be sent to the Bitcoin node in the next iteration of the ReceiveData loop.
+    /// The Bitcoin node will respond with either a tx or block message, depending on the type of data requested.
+    /// </summary>
+    /// <param name="hash">The hash in which to get data for</param>
+    public void GetData(string hash)
+    {  
+        if (!_connected)
+        {
+            throw new InvalidOperationException("Connection not established");
+        }
+
+        if (_client.Connected == false)
+        {
+            throw new InvalidOperationException("TCP connection down");
+        }
+
+        // Create a getdata payload
+        var getdataPayload = new byte[36];
+        var hashBytes = HexUtils.HexStringToByteArray(hash);
+        Array.Copy(hashBytes, 0, getdataPayload, 0, 32);
+        Array.Copy(BitConverter.GetBytes(2), 0, getdataPayload, 32, 4);
+
+        byte[] getdataHeader = MessageUtils.GenerateHeader("getdata", getdataPayload);
+
+        byte[] getdataMessage = new byte[getdataHeader.Length + getdataPayload.Length];
+
+        Array.Copy(getdataHeader, 0, getdataMessage, 0, getdataHeader.Length);
+        Array.Copy(getdataPayload, 0, getdataMessage, getdataHeader.Length, getdataPayload.Length);
+
+        // Send the getdata payload
+        Console.WriteLine("Enqueueing getdata message");
+        var nodeMessage = new NodeMessage("getdata", getdataMessage);
+        _writeQueue.Enqueue(nodeMessage);
     }
 
     private void HandleGetAddr(NodeResponse addrResp)
@@ -353,5 +411,10 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
             ProtocolVersion = _protocolVersion,
             InvVectors = _invVectors
         };
+    }
+    
+    public string GetMessagePayload(string id)
+    {
+        return _messagePayloads[id];
     }
 }

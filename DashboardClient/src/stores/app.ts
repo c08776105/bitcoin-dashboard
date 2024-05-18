@@ -22,6 +22,10 @@ export const useAppStore = defineStore('app', () => {
   const receivedMessages = ref<NodeMessage[]>([]);
   const invVectors = ref<InvVector[]>([]);
 
+  const displayPopup = ref(false);
+  const popupTitle = ref('');
+  const popupBody = ref('');
+
   const connectToSignalR = async () => {
     connection = new HubConnectionBuilder()
       .withUrl('http://localhost:5003/bitcoinNodeHub')
@@ -85,8 +89,30 @@ export const useAppStore = defineStore('app', () => {
     connection.invoke('SendGetAddresses');
   }
 
+  const getData = (hash: string) => {
+    connection.invoke('GetData', hash.replaceAll('-', ''));
+  }
+
+  const getMessagePayload = (id: string) => {
+    connection.invoke('GetMessagePayload', id);
+  };
+
   // Event handlers
   const configureHandlers = () => {
+    connection.on('MessagePayload', (id: string, payload: string) => {
+      displayPopup.value = true;
+      popupTitle.value = `Payload for ${id}`;
+      popupBody.value = payload;
+    });
+
+    connection.on('ReceiveTx', (data: string) => {
+      console.log(data);
+    });
+
+    connection.on('ReceiveBlock', (data: string) => {
+      console.log(data);
+    });
+
     connection.on("Echo", (echoString: string) => {
       console.log(echoString);
     });
@@ -131,6 +157,14 @@ export const useAppStore = defineStore('app', () => {
     connection.on('SendGetAddressesSuccess', () => {
       console.log('Successfully sent GetAddresses message to node');
     });
+
+    connection.on('GetDataError', (ex: string) => {
+      console.error(ex);
+    });
+
+    connection.on('GetDataSuccess', () => {
+      console.log('Successfully sent GetData message to node');
+    });
   };
 
   return {
@@ -149,6 +183,11 @@ export const useAppStore = defineStore('app', () => {
     userAgent,
     sentMessages,
     receivedMessages,
-    invVectors
+    invVectors,
+    getData,
+    getMessagePayload,
+    displayPopup,
+    popupTitle,
+    popupBody
   };
 })

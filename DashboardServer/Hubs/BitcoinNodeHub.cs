@@ -26,6 +26,28 @@ public class BitcoinNodeHub: Hub
         NodeState jsonState = _nodeConnection.GetState();
         await Clients.Caller.SendAsync("State", jsonState);
     }
+
+    public async Task GetMessagePayload(string id)
+    {
+        var messagePayload = _nodeConnection.GetMessagePayload(id);
+        await Clients.Caller.SendAsync("MessagePayload", id, messagePayload);
+    }
+
+    public async Task GetData(string hash)
+    {
+        
+        try
+        {
+            _nodeConnection.GetData(hash);
+        }
+        catch (Exception ex)
+        {
+            await Clients.Caller.SendAsync("GetDataError", ex.Message);
+            return;
+        }
+        
+        await Clients.Caller.SendAsync("GetDataSuccess");
+    }
     
     public async Task ConnectToNode(string nodeIp, ushort nodePort)
     {

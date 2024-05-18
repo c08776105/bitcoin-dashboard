@@ -1,8 +1,11 @@
 using System.Text;
 using DashboardServer.Utilities;
 
-namespace DashboardServer.Services;
+namespace DashboardServer.DTOs;
 
+/// <summary>
+/// This class represents a response from the Bitcoin node.
+/// </summary>
 public class NodeResponse
 {
     public byte[] header;

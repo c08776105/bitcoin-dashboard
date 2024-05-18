@@ -12,7 +12,6 @@
           Messages Sent: {{ sentMessages.length }}<br>
           Messages Received: {{ receivedMessages.length }}<br>
           Inv Vectors Received: {{ invVectors.length }}
-
           <v-card>
             <v-tabs
               v-model="tab"
@@ -28,7 +27,8 @@
                 <v-tabs-window-item value="Sent Messages">
                   <v-virtual-scroll :height="300" :items="sentMessages">
                     <template v-slot:default="{ item }">
-                      {{ item.sentTime }} - {{ item.message }}
+                      {{ new Date(item.sentTime).toLocaleTimeString() }} - {{ item.message }} -
+                      <v-btn size="xs" @click="appStore.getMessagePayload(item.id)" color="info">View</v-btn>
                     </template>
                   </v-virtual-scroll>
                 </v-tabs-window-item>
@@ -38,7 +38,8 @@
 
                   <v-virtual-scroll :height="300" :items="receivedMessages">
                     <template v-slot:default="{ item }">
-                      {{ item.sentTime }} - {{ item.message }}
+                      {{ new Date(item.sentTime).toLocaleTimeString() }} - {{ item.message }} -
+                      <v-btn size="xs" @click="appStore.getMessagePayload(item.id)" color="info">View</v-btn>
                     </template>
                   </v-virtual-scroll>
                 </v-tabs-window-item>
@@ -46,7 +47,8 @@
                 <v-tabs-window-item value="Inv Messages">
                   <v-virtual-scroll :height="300" :items="invVectors">
                     <template v-slot:default="{ item }">
-                      {{ item.type }} - {{ item.hash }}
+                      {{ item.type }} - {{ item.hash }} -
+                      <v-btn size="xs" @click="appStore.getData(item.hash)" color="info">Get Data</v-btn>
                     </template>
                   </v-virtual-scroll>
                 </v-tabs-window-item>
@@ -62,11 +64,26 @@
     <v-row>
       <v-col cols="12">
         <h1>Controls</h1>
-        <v-btn @click="appStore.connect()" color="primary">Connect</v-btn>
-        <v-btn @click="appStore.disconnect()" color="error">Disconnect</v-btn>
+        <v-btn @click="appStore.connect()" color="primary">
+          Connect
+          <v-tooltip activator="parent">
+            Connects to the node using the IP and Port provided
+          </v-tooltip>
+        </v-btn>
+        <v-btn @click="appStore.disconnect()" color="error">
+          Disconnect
+          <v-tooltip activator="parent">
+            Disconnects from the node
+          </v-tooltip>
+        </v-btn>
         <br>
         <div class="p-a-6">
-        <v-btn @click="appStore.getAddresses()" color="secondary">Get Addresses</v-btn>
+          <v-btn @click="appStore.getAddresses()" color="secondary">
+            Get Addresses
+            <v-tooltip activator="parent">
+              Sends a getaddr message to the node. Node may only respond with an addr every 24 hours
+            </v-tooltip>
+          </v-btn>
         </div>
       </v-col>
     </v-row>
@@ -78,6 +95,23 @@
       </v-col>
     </v-row>
   </v-container>
+
+  <v-dialog max-width="500" v-model="displayPopup">
+      <v-card :title="popupTitle">
+        <v-card-text style="white-space:pre-wrap; font-size: 10px; font-family: monospace">
+            {{ popupBody }}
+        </v-card-text>
+
+        <v-card-actions>
+          <v-spacer></v-spacer>
+
+          <v-btn
+            text="Close Dialog"
+            @click="displayPopup = false"
+          ></v-btn>
+        </v-card-actions>
+      </v-card>
+  </v-dialog>
 </template>
 
 <script lang="ts" setup>
@@ -90,7 +124,17 @@ const appStore = useAppStore();
 
 const tab = ref<string>('Sent Messages');
 
-const {nodeIP, nodePort, bitcoinConnectionState, sentMessages, receivedMessages, invVectors} = storeToRefs(appStore);
+const {
+  nodeIP,
+  nodePort,
+  bitcoinConnectionState,
+  sentMessages,
+  receivedMessages,
+  invVectors,
+  displayPopup,
+  popupTitle,
+  popupBody
+} = storeToRefs(appStore);
 
 onMounted(() => {
   appStore.connectToSignalR();
