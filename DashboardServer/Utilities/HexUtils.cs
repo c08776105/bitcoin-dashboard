@@ -17,13 +17,15 @@ public class HexUtils
             throw new ArgumentException("Hex string must have an even number of characters");
         }
 
-        byte[] bytes = new byte[hexString.Length / 2];
+        byte[] byteArray = new byte[hexString.Length / 2];
+
         for (int i = 0; i < hexString.Length; i += 2)
         {
-            bytes[i / 2] = Convert.ToByte(hexString.Substring(i, 2), 16);
+            string hexChar = hexString.Substring(i, 2);
+            byteArray[i / 2] = Convert.ToByte(hexChar, 16);
         }
 
-        return bytes;
+        return byteArray;
     }
     
     /// <summary>

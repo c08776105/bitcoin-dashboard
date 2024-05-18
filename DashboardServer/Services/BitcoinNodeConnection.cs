@@ -15,8 +15,8 @@ public interface IBitcoinNodeConnection
     public Task<string> ConnectToNode(string nodeIp, ushort nodePort);
     public Task ReceiveData();
     public void GetAddresses();
-    public void GetData(string hash);
-    public void Disconnect();
+    public void GetData(string hash, uint type);
+    public Task Disconnect();
     public NodeState GetState();
     public string GetMessagePayload(string id);
 }
@@ -38,9 +38,9 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
 
     private string? _protocolVersion;
     private string? _userAgent;
+    private string? nodeIpPort;
     
     private List<InvVector> _invVectors = new();
-    
     private Dictionary<string, string> _messagePayloads = new();
 
     /// <summary>
@@ -146,6 +146,10 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
             throw new InvalidOperationException(
                 $"Expected version message, instead received {versionResponse.message}");
         }
+        
+        var versionMessageID = Guid.NewGuid().ToString();
+        _receivedMessages.Add(new MessageReference(DateTime.Now, versionResponse.message, versionMessageID));
+        _messagePayloads.Add(versionMessageID, versionHexDump);
 
         // Await the verack message 
         var verackResp = await ReadNext();
@@ -153,6 +157,10 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
         var verackHexDump = verackResp.ToString();
         ret.Append(verackHexDump);
         Console.Write(verackHexDump);
+        
+        var verackMessageID = Guid.NewGuid().ToString();
+        _receivedMessages.Add(new MessageReference(DateTime.Now, verackResp.message, verackMessageID));
+        _messagePayloads.Add(verackMessageID, verackHexDump);
 
         // Send a verack payload (similar occess)
         byte[] verackPayload = new byte[24];
@@ -166,6 +174,7 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
         Console.WriteLine(HexUtils.GetHexDumpString(verackPayload));
 
         // Set connect to true, so the background thread can start receiving inv packets
+        nodeIpPort = $"{nodeIp}:{nodePort}";
         _connected = true;
         Task.Run(() => ReceiveData());
 
@@ -175,13 +184,24 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
     /// <summary>
     /// Disconnects from the Bitcoin node. This method should be called when the connection is no longer needed.
     /// </summary>
-    public void Disconnect()
+    public async Task Disconnect()
     {
         if (_connected)
         {
             _connected = false;
             _stream.Dispose();
             _client.Dispose();
+            
+            _writeQueue.Clear();
+            _sentMessages.Clear();
+            _receivedMessages.Clear();
+            _invVectors.Clear();
+            _messagePayloads.Clear();
+            _protocolVersion = null;
+            _userAgent = null;
+            nodeIpPort = null;
+            
+            await _bitcoinNodeHubContext.Clients.All.SendAsync("State", GetState());
 
             Console.WriteLine("Disconnected from Bitcoin node");
         }
@@ -196,6 +216,7 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
     /// </summary>
     public async Task ReceiveData()
     {
+        Console.Write("Receiving data from Bitcoin node");
         while (_connected)
         {
             var dispatchState = false;
@@ -213,7 +234,7 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
 
                 if (message.message == "getdata")
                 {
-                    Console.WriteLine(message.ToString());
+                    Console.WriteLine(HexUtils.GetHexDumpString(message.payload));
                 }
                 
                 dispatchState = true;
@@ -291,7 +312,7 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
     /// The Bitcoin node will respond with either a tx or block message, depending on the type of data requested.
     /// </summary>
     /// <param name="hash">The hash in which to get data for</param>
-    public void GetData(string hash)
+    public void GetData(string hash, uint type)
     {  
         if (!_connected)
         {
@@ -304,10 +325,15 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
         }
 
         // Create a getdata payload
-        var getdataPayload = new byte[36];
+        // Create a getdata payload
+        var count = 1; // Change this to the actual count of inventory vectors
+        var countBytes = BitConverter.GetBytes(count);
         var hashBytes = HexUtils.HexStringToByteArray(hash);
-        Array.Copy(hashBytes, 0, getdataPayload, 0, 32);
-        Array.Copy(BitConverter.GetBytes(2), 0, getdataPayload, 32, 4);
+        var getdataPayload = new byte[4 + count * (4 + 32)];
+
+        Array.Copy(countBytes, 0, getdataPayload, 0, 4);
+        Array.Copy(BitConverter.GetBytes(type), 0, getdataPayload, 4, 4);
+        Array.Copy(hashBytes, 0, getdataPayload, 8, 32);
 
         byte[] getdataHeader = MessageUtils.GenerateHeader("getdata", getdataPayload);
 
@@ -409,7 +435,8 @@ public class BitcoinNodeConnection : IBitcoinNodeConnection, IDisposable
             ReceivedMessages = _receivedMessages,
             UserAgent = _userAgent,
             ProtocolVersion = _protocolVersion,
-            InvVectors = _invVectors
+            InvVectors = _invVectors,
+            NodeIpPort = nodeIpPort
         };
     }
     

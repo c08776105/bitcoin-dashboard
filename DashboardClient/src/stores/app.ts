@@ -21,6 +21,7 @@ export const useAppStore = defineStore('app', () => {
   const sentMessages = ref<NodeMessage[]>([]);
   const receivedMessages = ref<NodeMessage[]>([]);
   const invVectors = ref<InvVector[]>([]);
+  const nodeIpPort = ref<string>('');
 
   const displayPopup = ref(false);
   const popupTitle = ref('');
@@ -63,6 +64,7 @@ export const useAppStore = defineStore('app', () => {
 
     if (connection.state === HubConnectionState.Connected) {
       try {
+        bitcoinConnectionState.value = ConnectionState.Connecting;
         connection.invoke('ConnectToNode', nodeIP.value, nodePort.value);
       } catch (err) {
         console.error(err);
@@ -89,8 +91,8 @@ export const useAppStore = defineStore('app', () => {
     connection.invoke('SendGetAddresses');
   }
 
-  const getData = (hash: string) => {
-    connection.invoke('GetData', hash.replaceAll('-', ''));
+  const getData = (hash: string, type: number) => {
+    connection.invoke('GetData', hash.replaceAll('-', ''), type);
   }
 
   const getMessagePayload = (id: string) => {
@@ -129,6 +131,7 @@ export const useAppStore = defineStore('app', () => {
       sentMessages.value = state.sentMessages;
       receivedMessages.value = state.receivedMessages;
       invVectors.value = state.invVectors;
+      nodeIpPort.value = state.nodeIpPort;
     });
 
     connection.on('ConnectError', (ex: string) => {
@@ -188,6 +191,7 @@ export const useAppStore = defineStore('app', () => {
     getMessagePayload,
     displayPopup,
     popupTitle,
-    popupBody
+    popupBody,
+    nodeIpPort
   };
 })

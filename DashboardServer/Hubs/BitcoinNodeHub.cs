@@ -33,12 +33,11 @@ public class BitcoinNodeHub: Hub
         await Clients.Caller.SendAsync("MessagePayload", id, messagePayload);
     }
 
-    public async Task GetData(string hash)
+    public async Task GetData(string hash, uint type)
     {
-        
         try
         {
-            _nodeConnection.GetData(hash);
+            _nodeConnection.GetData(hash, type);
         }
         catch (Exception ex)
         {
@@ -69,7 +68,7 @@ public class BitcoinNodeHub: Hub
     {
         try
         {
-            _nodeConnection.Disconnect();
+            await _nodeConnection.Disconnect();
         }
         catch (Exception ex)
         {

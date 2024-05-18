@@ -8,7 +8,7 @@
           <v-text-field label="Node Port" v-model="nodePort"/>
         </div>
         <div v-if="bitcoinConnectionState === ConnectionState.Connected">
-          Connected to node at {{ nodeIP }}:{{ nodePort }}<br>
+          Connected to node at {{ nodeIpPort }}<br>
           Messages Sent: {{ sentMessages.length }}<br>
           Messages Received: {{ receivedMessages.length }}<br>
           Inv Vectors Received: {{ invVectors.length }}
@@ -28,7 +28,25 @@
                   <v-virtual-scroll :height="300" :items="sentMessages">
                     <template v-slot:default="{ item }">
                       {{ new Date(item.sentTime).toLocaleTimeString() }} - {{ item.message }} -
-                      <v-btn size="xs" @click="appStore.getMessagePayload(item.id)" color="info">View</v-btn>
+
+                      <v-tooltip
+                        location="top"
+                      >
+                        <template v-slot:activator="{ props }">
+                          <v-btn
+                            @click="appStore.getMessagePayload(item.id)"
+                            icon
+                            v-bind="props"
+                            flat
+                            size="xs"
+                          >
+                            <v-icon color="grey-lighten-1">
+                              mdi-magnify
+                            </v-icon>
+                          </v-btn>
+                        </template>
+                        <span>View payload hex dump</span>
+                      </v-tooltip>
                     </template>
                   </v-virtual-scroll>
                 </v-tabs-window-item>
@@ -39,7 +57,24 @@
                   <v-virtual-scroll :height="300" :items="receivedMessages">
                     <template v-slot:default="{ item }">
                       {{ new Date(item.sentTime).toLocaleTimeString() }} - {{ item.message }} -
-                      <v-btn size="xs" @click="appStore.getMessagePayload(item.id)" color="info">View</v-btn>
+                      <v-tooltip
+                        location="top"
+                      >
+                        <template v-slot:activator="{ props }">
+                          <v-btn
+                            @click="appStore.getMessagePayload(item.id)"
+                            icon
+                            v-bind="props"
+                            flat
+                            size="xs"
+                          >
+                            <v-icon color="grey-lighten-1">
+                              mdi-magnify
+                            </v-icon>
+                          </v-btn>
+                        </template>
+                        <span>View payload hex dump</span>
+                      </v-tooltip>
                     </template>
                   </v-virtual-scroll>
                 </v-tabs-window-item>
@@ -47,8 +82,26 @@
                 <v-tabs-window-item value="Inv Messages">
                   <v-virtual-scroll :height="300" :items="invVectors">
                     <template v-slot:default="{ item }">
-                      {{ item.type }} - {{ item.hash }} -
-                      <v-btn size="xs" @click="appStore.getData(item.hash)" color="info">Get Data</v-btn>
+                      {{ formatType(item.type) }} - {{ item.hash }} -
+
+                      <v-tooltip
+                        location="top"
+                      >
+                        <template v-slot:activator="{ props }">
+                          <v-btn
+                            @click="appStore.getData(item.hash, item.type)"
+                            icon
+                            v-bind="props"
+                            flat
+                            size="xs"
+                          >
+                            <v-icon color="grey-lighten-1">
+                              mdi-database-search-outline
+                            </v-icon>
+                          </v-btn>
+                        </template>
+                        <span>Get data of {{ formatType(item.type) }} record</span>
+                      </v-tooltip>
                     </template>
                   </v-virtual-scroll>
                 </v-tabs-window-item>
@@ -112,6 +165,19 @@
         </v-card-actions>
       </v-card>
   </v-dialog>
+
+  <div class="text-center">
+    <v-overlay
+      :model-value="bitcoinConnectionState === ConnectionState.Connecting"
+      class="align-center justify-center"
+    >
+      <v-progress-circular
+        color="primary"
+        size="64"
+        indeterminate
+      ></v-progress-circular>
+    </v-overlay>
+  </div>
 </template>
 
 <script lang="ts" setup>
@@ -124,6 +190,12 @@ const appStore = useAppStore();
 
 const tab = ref<string>('Sent Messages');
 
+const formatType = (type: number) => {
+  return type === 1  ? 'tx'
+  : item.type === 2  ? 'block'
+  : '?';
+}
+
 const {
   nodeIP,
   nodePort,
@@ -133,7 +205,8 @@ const {
   invVectors,
   displayPopup,
   popupTitle,
-  popupBody
+  popupBody,
+  nodeIpPort
 } = storeToRefs(appStore);
 
 onMounted(() => {

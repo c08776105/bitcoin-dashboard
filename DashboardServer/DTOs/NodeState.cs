@@ -21,4 +21,7 @@ public class NodeState
     
     [JsonPropertyName("invVectors")]
     public List<InvVector> InvVectors { get; set; }
+    
+    [JsonPropertyName("nodeIpPort")]
+    public string NodeIpPort { get; set; }
 }
